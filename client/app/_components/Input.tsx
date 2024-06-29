@@ -12,6 +12,7 @@ const Input = () => {
         .post("http://localhost:8000/chat/user", { name: username })
         .then((res) => {
           localStorage.setItem("user", JSON.stringify(res.data)); // Store the object as a JSON string
+          window.location.reload();
         })
         .catch((err) => {
           console.error(err);

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
 import {
   Avatar,
@@ -14,78 +14,115 @@ import {
   Paper,
 } from "@mui/material";
 import { makeStyles } from "@mui/styles";
-import axios from "axios";
 import Input from "./Input";
+import axios from "axios";
 
 const socket = io("http://localhost:8000", {
   transports: ["websocket"],
 });
 
-const useStyles = makeStyles({
+const useStyles = makeStyles((theme) => ({
   chatSection: {
     width: "100%",
     height: "80vh",
+    margin: "auto",
+    borderRadius: "10px",
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
   },
   messageArea: {
     height: "70vh",
     overflowY: "auto",
+    padding: "20px",
+    backgroundColor: "#f5f5f5",
   },
   avatar: {
-    backgroundColor: "#3f51b5",
+    backgroundColor: "purple",
     color: "#fff",
   },
   ownMessage: {
     textAlign: "right",
   },
-});
+  pinnedDateHeader: {
+    position: "sticky",
+    top: 0,
+    backgroundColor: "#3f51b5",
+    color: "#fff",
+    padding: "5px",
+    zIndex: 10,
+    textAlign: "center",
+    fontSize: "14px",
+  },
+  messageDate: {
+    padding: "10px",
+    textAlign: "center",
+    fontSize: "12px",
+    color: "#666",
+  },
+  message: {
+    display: "flex",
+    alignItems: "center",
+  },
+  messageText: {
+    backgroundColor: "#e1f5fe",
+    borderRadius: "10px",
+    padding: "10px",
+    margin: "5px 0",
+    display: "inline-block",
+  },
+  ownMessageText: {
+    backgroundColor: "#bbdefb",
+  },
+  textField: {
+    backgroundColor: "#fff",
+    borderRadius: "10px",
+  },
+  inputArea: {
+    padding: "20px",
+    backgroundColor: "#fff",
+    borderTop: "1px solid #e0e0e0",
+  },
+}));
 
 const Chat = () => {
   const classes = useStyles();
   const [chatMessages, setChatMessages] = useState([]);
   const [message, setMessage] = useState("");
-  const [localStorageUpdated, setLocalStorageUpdated] = useState(false); // State to force re-render
+  const [pinnedDate, setPinnedDate] = useState("");
+  const messageAreaRef = useRef(null);
   const usernameObject = JSON.parse(localStorage.getItem("user"));
   const username = usernameObject ? usernameObject.name : null;
 
-  // Function to fetch messages
-  const getMessages = () => {
-    axios.get("http://localhost:8000/chat/messages")
-      .then((response) => {
-        setChatMessages(response.data);
-      })
-      .catch((error) => {
-        console.error("Error fetching messages:", error);
-      });
-  };
-
   useEffect(() => {
     if (username) {
-      getMessages(); // Fetch messages initially
+      getMessages();
 
       socket.on('message', (msg) => {
-        getMessages(); // Fetch messages again when a new message is received
-      });
-
-      socket.on('userJoined', (user) => {
-        console.log(`${user} has joined.`);
+        setChatMessages(prevMessages => {
+          const newMessages = [...prevMessages, msg];
+          return addDisplayDate(newMessages);
+        });
       });
 
       socket.emit('join', username);
     }
 
-    // Listen for changes in localStorage
-    const handleLocalStorageChange = () => {
-      setLocalStorageUpdated((prev) => !prev); // Toggle state to force re-render
-    };
-
-    window.addEventListener('storage', handleLocalStorageChange);
-
     return () => {
       socket.off('message');
-      socket.off('userJoined');
-      window.removeEventListener('storage', handleLocalStorageChange);
     };
-  }, [username, localStorageUpdated]);
+  }, [username]);
+
+  const getMessages = () => {
+    axios.get("http://localhost:8000/chat/messages")
+      .then((response) => {
+        const messagesWithDate = addDisplayDate(response.data);
+        setChatMessages(messagesWithDate);
+      })
+      .catch((error) => {
+        console.error("Error fetching messages:", error);
+      });
+  };
 
   const handleSendMessage = () => {
     if (message.trim() === "") return;
@@ -96,14 +133,39 @@ const Chat = () => {
       user: usernameObject._id,
     };
 
-    socket.emit('message', newMessage, () => {
-      getMessages(); // Fetch messages again after sending a new message
-    });
+    socket.emit('message', newMessage);
     setMessage("");
+
+    // Call the getMessages API after sending the message
+    getMessages();
+  };
+
+  const addDisplayDate = (messages) => {
+    let lastDate = null;
+    return messages.map(msg => {
+      const messageDate = new Date(msg.timestamp).toLocaleDateString();
+      const displayDate = messageDate !== lastDate ? messageDate : null;
+      lastDate = messageDate;
+      return { ...msg, displayDate };
+    });
+  };
+
+  const handleScroll = () => {
+    if (!messageAreaRef.current) return;
+    const messages = messageAreaRef.current.getElementsByClassName("message-date");
+    const scrollTop = messageAreaRef.current.scrollTop;
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      const offsetTop = message.offsetTop;
+      if (scrollTop < offsetTop) {
+        setPinnedDate(message.innerText);
+        break;
+      }
+    }
   };
 
   const getInitials = (name) => {
-    if (!name) return "U"; // Default to "U" if name is not available
+    if (!name) return "U";
 
     const initials = name
       .split(" ")
@@ -112,7 +174,19 @@ const Chat = () => {
     return initials.toUpperCase();
   };
 
-  if (!usernameObject) {
+  useEffect(() => {
+    if (messageAreaRef.current) {
+      messageAreaRef.current.addEventListener("scroll", handleScroll);
+    }
+
+    return () => {
+      if (messageAreaRef.current) {
+        messageAreaRef.current.removeEventListener("scroll", handleScroll);
+      }
+    };
+  }, []);
+
+  if (!username) {
     return <Input />;
   }
 
@@ -120,37 +194,53 @@ const Chat = () => {
 
   return (
     <div>
-      <Grid container>
-        <Grid item xs={12}>
-          <Typography variant="h5" className="header-message">
+      <Grid container justifyContent="center">
+        <Grid item xs={12} md={8}>
+          <Typography variant="h5" className="header-message" align="center" gutterBottom>
             Chat
           </Typography>
         </Grid>
       </Grid>
       <Grid container component={Paper} className={classes.chatSection}>
         <Grid item xs={12}>
-          <List className={classes.messageArea}>
+          <div className={classes.pinnedDateHeader}>
+            {pinnedDate}
+          </div>
+          <List className={classes.messageArea} ref={messageAreaRef}>
             {sortedMessages.map((msg, index) => (
-              <ListItem key={index} className={msg.user[0]?.name === username ? classes.ownMessage : ""}>
-                <Grid container alignItems="center">
-                  <Grid item xs={1}>
-                    <Avatar className={classes.avatar}>
-                      {getInitials(msg.user[0]?.name)}
-                    </Avatar>
+              <div key={index}>
+                {msg.displayDate && (
+                  <div className={`${classes.messageDate} message-date`}>
+                    {msg.displayDate === new Date().toLocaleDateString() ? 'Today' :
+                      new Date(msg.timestamp).toLocaleDateString() === new Date(new Date().setDate(new Date().getDate() - 1)).toLocaleDateString() ? 'Yesterday' :
+                        msg.displayDate}
+                  </div>
+                )}
+                <ListItem className={msg.user[0]?.name === username ? classes.ownMessage : ""}>
+                  <Grid container className={classes.message}>
+                    <Grid item>
+                      <Avatar className={classes.avatar}>
+                        {getInitials(msg.user[0]?.name)}
+                      </Avatar>
+                    </Grid>
+                    <Grid item xs>
+                      <ListItemText
+                        align={msg.user[0]?.name === username ? "right" : "left"}
+                        primary={
+                          <div className={`${classes.messageText} ${msg.user[0]?.name === username ? classes.ownMessageText : ""}`}>
+                            {msg.message}
+                          </div>
+                        }
+                        secondary={new Date(msg.timestamp).toLocaleString()}
+                      />
+                    </Grid>
                   </Grid>
-                  <Grid item xs={11}>
-                    <ListItemText
-                      align={msg.user[0]?.name === username ? "right" : "left"}
-                      primary={`${msg.user[0]?.name}: ${msg.message}`}
-                      secondary={new Date(msg.timestamp).toLocaleString()}
-                    />
-                  </Grid>
-                </Grid>
-              </ListItem>
+                </ListItem>
+              </div>
             ))}
           </List>
           <Divider />
-          <Grid container style={{ padding: "20px" }}>
+          <Grid container className={classes.inputArea}>
             <Grid item xs={11}>
               <TextField
                 id="outlined-basic-email"
@@ -163,6 +253,8 @@ const Chat = () => {
                     handleSendMessage();
                   }
                 }}
+                className={classes.textField}
+                variant="outlined"
               />
             </Grid>
             <Grid item xs={1} align="right">
