@@ -24,7 +24,7 @@ const socket = io("http://localhost:8000", {
 const useStyles = makeStyles((theme) => ({
   chatSection: {
     width: "100%",
-    height: "80vh",
+    height: "85vh",
     margin: "auto",
     borderRadius: "10px",
     overflow: "hidden",
